@@ -1,0 +1,25 @@
+[package]
+name = "potom"
+version = "0.1.0"
+description = "потом. — персональный задачник"
+edition = "2024"
+rust-version = "1.90"
+
+[lib]
+name = "potom_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rusqlite = { version = "0.38", features = ["bundled"] }
+rfd = "0.17"
+open = "5"
+url = "2"
+tempfile = "3"

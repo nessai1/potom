@@ -1,1 +1,8 @@
 /target
+node_modules/
+dist/
+playwright-report/
+test-results/
+.DS_Store
+*.tsbuildinfo
+src-tauri/gen/
