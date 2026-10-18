@@ -117,6 +117,13 @@ fn save_data(data: Value, state: State<'_, AppStore>) -> Result<(), String> {
     locked(&state)?.save(&data)
 }
 #[tauri::command]
+fn reset_data(window: tauri::WebviewWindow, state: State<'_, AppStore>) -> Result<Value, String> {
+    if window.label() != "main" {
+        return Err("Очистить данные можно только из главного окна.".into());
+    }
+    locked(&state)?.reset()
+}
+#[tauri::command]
 fn get_storage_info(state: State<'_, AppStore>) -> Result<StorageInfo, String> {
     Ok(locked(&state)?.info())
 }
@@ -218,6 +225,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             load_data,
             save_data,
+            reset_data,
             export_backup,
             import_backup,
             get_storage_info,

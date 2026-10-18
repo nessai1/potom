@@ -45,6 +45,7 @@ import type {
 import {
   loadData,
   saveData,
+  resetData,
   exportBackup,
   importBackup,
   getStorageInfo,
@@ -85,6 +86,7 @@ type Modal =
   | { kind: "help" }
   | { kind: "profile" }
   | { kind: "import" }
+  | { kind: "reset" }
   | null;
 const viewNames: Record<View, string> = {
   list: "Мои задачи",
@@ -555,6 +557,51 @@ export default function App() {
       setBusy(false);
     }
   };
+  const doReset = async () => {
+    if (busy) return;
+    setBusy(true);
+    setOperationError("");
+    try {
+      if (dataRef.current) await flush();
+      const next = await resetData();
+      dataRef.current = next;
+      version.current++;
+      savedVersion.current = version.current;
+      setData(next);
+      setLoadError("");
+      setSaveError("");
+      setSaveState("saved");
+      setSelectedId(null);
+      setModal(null);
+      setView("list");
+      setTab("all");
+      setProjectFilter("");
+      setSearch("");
+      setActiveOpen(false);
+      getStorageInfo()
+        .then(setStorageInfo)
+        .catch(() => {});
+      inform("Чистый лист. Все достижения снова закрыты.");
+    } catch (error) {
+      setOperationError(errorText(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const closeModal = () => {
+    setModal(null);
+    setOperationError("");
+  };
+  const resetDialog = modal?.kind === "reset" && (
+    <ResetData
+      busy={busy}
+      error={operationError}
+      onClose={() => {
+        if (!busy) closeModal();
+      }}
+      onReset={() => void doReset()}
+    />
+  );
   const navigate = (next: View) => {
     flushEditors();
     setSelectedId(null);
@@ -590,6 +637,16 @@ export default function App() {
                 <Upload className="icon" />
                 Импорт резервной копии
               </button>
+              <button
+                className="secondary-btn"
+                disabled={busy}
+                onClick={() => {
+                  setOperationError("");
+                  setModal({ kind: "reset" });
+                }}
+              >
+                Сбросить данные
+              </button>
             </div>
             {operationError && <p role="alert">{operationError}</p>}
           </section>
@@ -599,6 +656,7 @@ export default function App() {
             Открываем личное пространство…
           </p>
         )}
+        {resetDialog}
       </div>
     );
   }
@@ -614,10 +672,6 @@ export default function App() {
     active = data.tasks.filter((t) => t.status === "progress"),
     selected = data.tasks.find((t) => t.id === selectedId),
     currentProject = visibleProjects.find((p) => p.id === projectFilter);
-  const closeModal = () => {
-    setModal(null);
-    setOperationError("");
-  };
   return (
     <>
       <div className={`app-shell ${isDesktop() ? "native-shell" : ""}`}>
@@ -1215,6 +1269,21 @@ export default function App() {
               </details>
             )}
           </div>
+          <div className="backup-section">
+            <h3>Начать заново</h3>
+            <p>Очистить задачи, проекты и достижения на этом устройстве.</p>
+            <button
+              className="danger-btn"
+              disabled={busy}
+              onClick={() => {
+                setOperationError("");
+                setModal({ kind: "reset" });
+              }}
+            >
+              <Trash2 className="icon" />
+              Сбросить данные
+            </button>
+          </div>
           <Shortcuts />
           <div className="modal-footer">
             <span>потом. · Лапки есть. ТЗ нет.</span>
@@ -1264,6 +1333,7 @@ export default function App() {
           </div>
         </Dialog>
       )}
+      {resetDialog}
       {modal?.kind === "help" && (
         <Dialog title="Лапки есть. Инструкция тоже." onClose={closeModal}>
           <p>
@@ -1319,6 +1389,77 @@ export default function App() {
         {toast}
       </div>
     </>
+  );
+}
+
+function ResetData({
+  busy,
+  error,
+  onClose,
+  onReset,
+}: {
+  busy: boolean;
+  error: string;
+  onClose: () => void;
+  onReset: () => void;
+}) {
+  const [confirmation, setConfirmation] = useState("");
+  const confirmed = confirmation.trim() === "СБРОСИТЬ";
+  return (
+    <Dialog title="Начать с чистого листа?" onClose={onClose}>
+      <p>
+        Все задачи, проекты и документы исчезнут из текущего пространства.
+        Достижения и настройки вернутся к начальному состоянию.
+      </p>
+      <p>
+        Перед сбросом сохраним резервную копию <b>before-reset</b> в папке
+        резервных копий.
+      </p>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (confirmed && !busy) onReset();
+        }}
+      >
+        <div className="form-field">
+          <label htmlFor="reset-confirmation">
+            Для подтверждения введите СБРОСИТЬ
+          </label>
+          <input
+            id="reset-confirmation"
+            value={confirmation}
+            onChange={(event) => setConfirmation(event.target.value)}
+            disabled={busy}
+            autoComplete="off"
+            spellCheck={false}
+            data-autofocus
+          />
+        </div>
+        {error && (
+          <p className="modal-error" role="alert">
+            {error}
+          </p>
+        )}
+        <div className="modal-footer">
+          <button
+            type="button"
+            className="secondary-btn"
+            disabled={busy}
+            onClick={onClose}
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            className="danger-btn"
+            disabled={!confirmed || busy}
+          >
+            <Trash2 className="icon" />
+            {busy ? "Сбрасываем…" : "Сбросить данные"}
+          </button>
+        </div>
+      </form>
+    </Dialog>
   );
 }
 

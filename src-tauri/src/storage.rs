@@ -240,8 +240,76 @@ impl Store {
 
     pub fn import(&mut self, bytes: &[u8]) -> Result<Value, String> {
         let archive = parse_archive(bytes)?;
+        self.replace_validated(
+            archive.data,
+            "before-import",
+            archive.migrated.then_some(bytes),
+        )
+    }
+
+    /// Persist an explicitly empty workspace, including on the very first launch.
+    /// A readable database stays in place: SQLite rolls back any failed reset.
+    pub fn reset(&mut self) -> Result<Value, String> {
+        let empty = serde_json::json!({
+            "schema": 2,
+            "tasks": [],
+            "projects": [],
+            "unlocked": [],
+            "metrics": {},
+            "settings": { "theme": "light", "cleanLanguage": false }
+        });
+        match self.raw() {
+            Ok(previous) => {
+                if let Some(previous) = previous {
+                    self.backup_bytes("before-reset", previous.as_bytes())?;
+                }
+                Self::commit_at(
+                    &self.path(),
+                    &serde_json::to_string(&empty).map_err(io_error)?,
+                )?;
+                self.last_backup = None;
+                Ok(empty)
+            }
+            // Explicit reset can repair a corrupted or unreadable-version database,
+            // preserving its original SQLite files before atomic replacement.
+            Err(_) if self.path().is_file() => self.replace_validated(empty, "before-reset", None),
+            Err(error) => Err(error),
+        }
+    }
+
+    fn backup_database(&self, reason: &str) -> Result<(), String> {
+        fs::create_dir_all(self.backups()).map_err(io_error)?;
+        let stamp = timestamp();
+        // Keep available recovery journals alongside a damaged database as well.
+        for suffix in ["", "-wal", "-shm", "-journal"] {
+            let source = self.directory.join(format!("potom.sqlite3{suffix}"));
+            if !suffix.is_empty() && !source.try_exists().map_err(io_error)? {
+                continue;
+            }
+            let target = self
+                .backups()
+                .join(format!("corrupted-{reason}-{stamp}.sqlite3{suffix}"));
+            fs::copy(source, &target).map_err(io_error)?;
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .open(target)
+                .map_err(io_error)?
+                .sync_all()
+                .map_err(io_error)?;
+        }
+        sync_directory(&self.backups())
+    }
+
+    fn replace_validated(
+        &mut self,
+        data: Value,
+        backup_reason: &str,
+        before_migration: Option<&[u8]>,
+    ) -> Result<Value, String> {
+        validate(&data)?;
         fs::create_dir_all(&self.directory).map_err(io_error)?;
-        let text = serde_json::to_string(&archive.data).map_err(io_error)?;
+        let text = serde_json::to_string(&data).map_err(io_error)?;
         // Candidate database is fully committed before touching the original, including corrupted originals.
         let candidate = tempfile::NamedTempFile::new_in(&self.directory)
             .map_err(io_error)?
@@ -250,27 +318,15 @@ impl Store {
         let backup_result = (|| -> Result<(), String> {
             match self.raw() {
                 Ok(Some(previous)) => {
-                    self.backup_bytes("before-import", previous.as_bytes())?;
+                    self.backup_bytes(backup_reason, previous.as_bytes())?;
                 }
                 Ok(None) => {}
                 Err(_) if self.path().exists() => {
-                    fs::create_dir_all(self.backups()).map_err(io_error)?;
-                    let target = self
-                        .backups()
-                        .join(format!("corrupted-{}.sqlite3", timestamp()));
-                    fs::copy(self.path(), &target).map_err(io_error)?;
-                    OpenOptions::new()
-                        .read(true)
-                        .write(true)
-                        .open(target)
-                        .map_err(io_error)?
-                        .sync_all()
-                        .map_err(io_error)?;
-                    sync_directory(&self.backups())?;
+                    self.backup_database(backup_reason)?;
                 }
                 Err(error) => return Err(error),
             }
-            if archive.migrated {
+            if let Some(bytes) = before_migration {
                 self.backup_bytes("import-before-migration", bytes)?;
             }
             Ok(())
@@ -279,7 +335,7 @@ impl Store {
         candidate.persist(self.path()).map_err(io_error)?;
         sync_directory(&self.directory)?;
         self.last_backup = None;
-        Ok(archive.data)
+        Ok(data)
     }
 }
 
@@ -405,5 +461,118 @@ mod tests {
         for file in files {
             parse_archive(&fs::read(file.unwrap().path()).unwrap()).unwrap();
         }
+    }
+
+    #[test]
+    fn reset_persists_an_empty_workspace_and_preserves_a_restorable_original() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::new(directory.path().into());
+        let mut original = fixture();
+        original["unlocked"] = json!(["first", "night"]);
+        original["metrics"] = json!({"created": 10, "descriptionEdits": {"1": 4}});
+        original["settings"] = json!({"theme": "dark", "cleanLanguage": true});
+        store.save(&original).unwrap();
+        let empty = store.reset().unwrap();
+        assert_eq!(
+            empty,
+            json!({
+                "schema": 2, "tasks": [], "projects": [], "unlocked": [], "metrics": {},
+                "settings": {"theme": "light", "cleanLanguage": false}
+            })
+        );
+        validate(&empty).unwrap();
+        let backup = fs::read_dir(store.backups())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("before-reset")
+            })
+            .unwrap();
+        let previous_bytes = fs::read(backup).unwrap();
+        assert_eq!(parse_archive(&previous_bytes).unwrap().data, original);
+        drop(store);
+        let mut restarted = Store::new(directory.path().into());
+        assert_eq!(restarted.load().unwrap(), Some(empty));
+        assert_eq!(restarted.import(&previous_bytes).unwrap(), original);
+    }
+
+    #[test]
+    fn reset_before_first_save_is_persistent_data_instead_of_a_seed_request() {
+        let directory = tempfile::tempdir().unwrap();
+        let empty = Store::new(directory.path().into()).reset().unwrap();
+        let mut restarted = Store::new(directory.path().into());
+        assert_eq!(restarted.load().unwrap(), Some(empty));
+    }
+
+    #[test]
+    fn reset_repairs_a_corrupted_database_after_preserving_its_original_bytes() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::new(directory.path().into());
+        let damaged = b"a damaged database with irreplaceable original bytes";
+        fs::write(store.path(), damaged).unwrap();
+        let empty = store.reset().unwrap();
+        let backup = fs::read_dir(store.backups())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains("before-reset")
+            })
+            .unwrap();
+        assert_eq!(fs::read(backup).unwrap(), damaged);
+        drop(store);
+        assert_eq!(
+            Store::new(directory.path().into()).load().unwrap(),
+            Some(empty)
+        );
+    }
+
+    #[test]
+    fn failed_reset_backup_preserves_valid_or_damaged_database_and_allows_retry() {
+        for corrupt in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let mut store = Store::new(directory.path().into());
+            if corrupt {
+                fs::write(store.path(), b"damaged database").unwrap();
+            } else {
+                store.save(&fixture()).unwrap();
+                fs::remove_dir_all(store.backups()).unwrap();
+            }
+            let before = fs::read(store.path()).unwrap();
+            fs::write(store.backups(), b"backup directory is blocked").unwrap();
+            assert!(store.reset().is_err());
+            assert_eq!(fs::read(store.path()).unwrap(), before);
+            if !corrupt {
+                assert_eq!(store.load().unwrap(), Some(fixture()));
+            }
+            fs::remove_file(store.backups()).unwrap();
+            let empty = store.reset().unwrap();
+            assert_eq!(store.load().unwrap(), Some(empty));
+        }
+    }
+
+    #[test]
+    fn failed_reset_transaction_rolls_back_without_frontend_or_storage_data_loss() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::new(directory.path().into());
+        let original = fixture();
+        store.save(&original).unwrap();
+        let connection = store.connection().unwrap();
+        connection.execute_batch("CREATE TRIGGER fail_reset BEFORE UPDATE ON app_state BEGIN SELECT RAISE(ABORT, 'simulated storage failure'); END;").unwrap();
+        assert!(store.reset().is_err());
+        assert_eq!(store.load().unwrap(), Some(original));
+        connection.execute_batch("DROP TRIGGER fail_reset").unwrap();
+        let empty = store.reset().unwrap();
+        drop(connection);
+        drop(store);
+        assert_eq!(
+            Store::new(directory.path().into()).load().unwrap(),
+            Some(empty)
+        );
     }
 }

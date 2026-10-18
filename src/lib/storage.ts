@@ -1,5 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { AppData } from "../types";
+import { createInitialData } from "../model/initial-data";
 
 const KEY = "potom-ui-v1";
 const BACKUP_KEY = "potom-backups-v1";
@@ -224,6 +225,16 @@ export async function loadData(): Promise<AppData | null> {
 export async function saveData(data: AppData): Promise<void> {
   if (isDesktop()) return invoke<void>("save_data", { data });
   flushBrowserData(data);
+}
+
+export async function resetData(): Promise<AppData> {
+  if (isDesktop()) return invoke<AppData>("reset_data");
+  const empty = createInitialData();
+  const previous = localStorage.getItem(KEY);
+  if (previous !== null) backupBrowser(previous, "before-reset");
+  localStorage.setItem(KEY, JSON.stringify(empty));
+  lastBackup = 0;
+  return empty;
 }
 
 function download(name: string, text: string, type: string): string {
