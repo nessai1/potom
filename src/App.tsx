@@ -51,7 +51,7 @@ import {
   isDesktop,
   flushBrowserData,
 } from "./lib/storage";
-import { createSeed } from "./model/seed";
+import { createInitialData } from "./model/initial-data";
 import {
   listenQuickTasks,
   publishQuickTasks,
@@ -235,7 +235,7 @@ export default function App() {
     setSaveState("loading");
     try {
       const loaded = await loadData();
-      const next = evaluateAchievements(loaded || createSeed());
+      const next = evaluateAchievements(loaded ?? createInitialData());
       const changed =
         !loaded ||
         JSON.stringify(next.unlocked) !== JSON.stringify(loaded.unlocked);
@@ -1003,11 +1003,19 @@ export default function App() {
           initialStatus={modal.status || "created"}
           initialDue={modal.due || ""}
           onClose={closeModal}
-          onCreate={(task) => {
+          onCreate={(task, firstProjectName) => {
             const id =
               Math.max(0, ...dataRef.current!.tasks.map((t) => t.id)) + 1;
+            const firstProject = firstProjectName
+              ? {
+                  id: `project-${Date.now()}`,
+                  name: firstProjectName,
+                  color: "#dba4bd",
+                }
+              : null;
             const next: Task = {
               ...task,
+              project: firstProject?.id ?? task.project,
               id,
               checklist: [],
               notes: [],
@@ -1017,6 +1025,9 @@ export default function App() {
             mutate((current) => {
               const added = {
                 ...current,
+                projects: firstProject
+                  ? [...current.projects, firstProject]
+                  : current.projects,
                 tasks: [
                   ...current.tasks,
                   {
@@ -1038,7 +1049,7 @@ export default function App() {
             setModal(null);
             setTab("all");
             setSearch("");
-            if (projectFilter && projectFilter !== task.project)
+            if (projectFilter && projectFilter !== next.project)
               setProjectFilter("");
             if (view === "achievements") setView("list");
             setSelectedId(id);
@@ -1337,7 +1348,7 @@ function NewTaskForm({
   onCreate,
 }: {
   projects: Project[];
-  initialProject: string;
+  initialProject?: string;
   initialStatus: Status;
   initialDue: string;
   onClose: () => void;
@@ -1346,23 +1357,32 @@ function NewTaskForm({
       Task,
       "title" | "project" | "status" | "due" | "priority" | "description"
     >,
+    firstProjectName?: string,
   ) => void;
 }) {
   const [title, setTitle] = useState(""),
-    [project, setProject] = useState(initialProject),
+    [project, setProject] = useState(initialProject || ""),
+    [firstProjectName, setFirstProjectName] = useState(""),
     [due, setDue] = useState(initialDue),
     [description, setDescription] = useState("");
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (title.trim())
-      onCreate({
+    if (
+      !title.trim() ||
+      (projects.length ? !project : !firstProjectName.trim())
+    )
+      return;
+    onCreate(
+      {
         title: title.trim(),
         project,
         status: initialStatus,
         due,
         priority: "normal",
         description: description.trim(),
-      });
+      },
+      projects.length ? undefined : firstProjectName.trim(),
+    );
   };
   return (
     <Dialog title="Что у нас в планах?" onClose={onClose}>
@@ -1383,18 +1403,32 @@ function NewTaskForm({
         </div>
         <div className="form-pair">
           <div className="form-field">
-            <label htmlFor="new-project">Проект</label>
-            <select
-              id="new-project"
-              value={project}
-              onChange={(e) => setProject(e.target.value)}
-            >
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <label htmlFor="new-project">
+              {projects.length ? "Проект" : "Название проекта"}
+            </label>
+            {projects.length ? (
+              <select
+                id="new-project"
+                value={project}
+                required
+                onChange={(e) => setProject(e.target.value)}
+              >
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                id="new-project"
+                value={firstProjectName}
+                required
+                maxLength={100}
+                placeholder="Например, Личное"
+                onChange={(e) => setFirstProjectName(e.target.value)}
+              />
+            )}
           </div>
           <div className="form-field">
             <label htmlFor="new-due">Крайний срок</label>
@@ -1423,7 +1457,10 @@ function NewTaskForm({
           <button
             className="primary-btn"
             type="submit"
-            disabled={!title.trim() || !project}
+            disabled={
+              !title.trim() ||
+              (projects.length ? !project : !firstProjectName.trim())
+            }
           >
             <Plus className="icon" />
             Создать задачу

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { AppData, Task } from "../types";
-import { createSeed } from "./seed";
+import { createInitialData } from "./initial-data";
 import {
   achievementProgress,
+  achievements,
   evaluateAchievements,
   filterTasks,
   percent,
@@ -137,12 +138,14 @@ describe("календарь и фильтры", () => {
   });
 });
 describe("достижения", () => {
-  it("демо не выдаёт награды за клики, которых не было", () => {
-    const seed = evaluateAchievements(createSeed());
-    expect(seed.unlocked).not.toContain("markdown");
-    expect(seed.unlocked).not.toContain("cat_pets");
-    expect(seed.unlocked).not.toContain("train");
-    expect(seed.unlocked).toContain("first");
+  it("чистая установка не содержит задач, проектов или прогресса достижений", () => {
+    const initial = evaluateAchievements(createInitialData());
+    expect(initial.tasks).toEqual([]);
+    expect(initial.projects).toEqual([]);
+    expect(initial.metrics).toEqual({});
+    expect(initial.unlocked).toEqual([]);
+    for (const achievement of achievements)
+      expect(achievementProgress(initial, achievement.id)).toBe(0);
   });
   it("уже полученная награда сохраняется при регрессе", () => {
     let d = evaluateAchievements(data([task({ status: "done" })]));
