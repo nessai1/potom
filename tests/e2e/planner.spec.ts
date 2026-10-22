@@ -181,30 +181,27 @@ test("семидневная повестка соблюдает границы 
   await expect(main.getByText("Без даты", { exact: true })).toHaveCount(0);
 });
 
-test("быстрый ввод Markdown сохраняется при закрытии до debounce", async ({
+test("черновик комментария сохраняется при закрытии и не публикуется сам", async ({
   page,
 }) => {
   let dialog = await openTask(page, "Без даты");
-  await dialog.getByRole("tab", { name: /Заметки/ }).click();
-  await dialog
-    .getByRole("button", { name: "Исходный Markdown", exact: true })
-    .click();
-  const source = dialog.getByRole("textbox", { name: /исходный Markdown/i });
+  const before = await storedTask(page, 1);
+  const source = dialog.getByRole("textbox", {
+    name: "Комментарий",
+    exact: true,
+  });
   const markdown =
     "# Новая версия\n\nНесохранённый буфер\n\n| A | B |\n| --- | --- |\n| 1 | 2 |";
   await source.fill(markdown);
   await page.keyboard.press("Escape");
   await expect
-    .poll(async () => (await storedTask(page, 1)).notes[0].text)
+    .poll(async () => (await storedTask(page, 1)).commentDraft)
     .toBe(markdown);
+  expect((await storedTask(page, 1)).notes).toEqual(before.notes);
   await page.reload();
   dialog = await openTask(page, "Без даты");
-  await dialog.getByRole("tab", { name: /Заметки/ }).click();
-  await dialog
-    .getByRole("button", { name: "Исходный Markdown", exact: true })
-    .click();
   await expect(
-    dialog.getByRole("textbox", { name: /исходный Markdown/i }),
+    dialog.getByRole("textbox", { name: "Комментарий", exact: true }),
   ).toHaveValue(markdown);
 });
 

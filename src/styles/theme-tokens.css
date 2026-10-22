@@ -15,6 +15,24 @@ html[data-theme="light"] {
   --white: #fffafd;
   --green: #8e9d7c;
   --theme-base: #fcf6f9;
+  --theme-workspace-background:
+    url("/assets/workspace-noise.svg"),
+    radial-gradient(
+      ellipse at 8% 3%,
+      rgb(234 128 184 / 62%) 0,
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse at 100% 28%,
+      rgb(175 140 230 / 54%) 0,
+      transparent 57%
+    ),
+    radial-gradient(
+      ellipse at 62% 100%,
+      rgb(255 179 138 / 65%) 0,
+      transparent 59%
+    ),
+    linear-gradient(145deg, #fff1f8 0%, #f5dfed 54%, #f8e9fc 100%);
   --theme-sidebar: #f7e9f0;
   --theme-sidebar-hover: #f0dce7;
   --theme-topbar: #fff9fc;
@@ -74,6 +92,20 @@ html[data-theme="dark"] {
   --white: #332b38;
   --green: #adbb97;
   --theme-base: #28222c;
+  --theme-workspace-background:
+    url("/assets/workspace-noise.svg"),
+    radial-gradient(ellipse at 8% 0%, rgb(185 57 126 / 55%) 0, transparent 57%),
+    radial-gradient(
+      ellipse at 100% 25%,
+      rgb(117 75 178 / 48%) 0,
+      transparent 56%
+    ),
+    radial-gradient(
+      ellipse at 65% 100%,
+      rgb(185 73 110 / 37%) 0,
+      transparent 60%
+    ),
+    linear-gradient(145deg, #302032 0%, #29212f 54%, #39273c 100%);
   --theme-sidebar: #242029;
   --theme-sidebar-hover: #352b39;
   --theme-topbar: #2b2531;

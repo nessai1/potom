@@ -83,33 +83,32 @@ test("после старого выделения Ctrl+B форматирует
     .toBe("one two three**X**");
 });
 
-test("после старого выделения source shortcut использует текущую каретку", async ({
+test("изменение комментария сохраняет буквальный Markdown без окна документов", async ({
   page,
 }) => {
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: /Заметки/ }).click();
+  await expect(dialog.getByRole("tab", { name: /Заметки/ })).toHaveCount(0);
   await dialog
-    .getByRole("button", { name: "Исходный Markdown", exact: true })
+    .getByRole("button", { name: "Редактировать комментарий 2", exact: true })
     .click();
-  const source = dialog.getByRole("textbox", { name: /исходный Markdown/i });
+  const source = dialog.getByRole("textbox", {
+    name: "Текст комментария",
+    exact: true,
+  });
   await source.focus();
   await source.evaluate((element: HTMLTextAreaElement) => {
     element.setSelectionRange(0, 3);
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await expect(
-    page.getByRole("toolbar", { name: "Форматирование текста" }),
-  ).toBeVisible();
   await source.evaluate((element: HTMLTextAreaElement) => {
     element.setSelectionRange(element.value.length, element.value.length);
     element.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
   });
-  await expect(
-    page.getByRole("toolbar", { name: "Форматирование текста" }),
-  ).toHaveCount(0);
-  await page.keyboard.press("Control+b");
-  await page.keyboard.type("X");
+  await page.keyboard.type("**X**");
   await expect(source).toHaveValue("one two three**X**");
+  await dialog
+    .getByRole("button", { name: "Сохранить комментарий", exact: true })
+    .click();
   await page.keyboard.press("Escape");
   await expect
     .poll(() =>

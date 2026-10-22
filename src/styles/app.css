@@ -11,6 +11,9 @@
 .sidebar {
   min-height: 0;
 }
+.sidebar-cat-card .cat-bubble {
+  overflow-wrap: anywhere;
+}
 .brand {
   flex-shrink: 0;
 }

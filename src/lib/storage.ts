@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { AppData } from "../types";
 import { createInitialData } from "../model/initial-data";
+import { validateAttachment } from "./attachments";
 
 const KEY = "potom-ui-v1";
 const BACKUP_KEY = "potom-backups-v1";
@@ -141,6 +142,17 @@ export function parseArchive(text: string): AppData {
       return id(note.id, "note.id");
     });
     unique(noteIds, `${path}.notes`);
+    if (task.commentDraft !== undefined)
+      string(task.commentDraft, `${path}.commentDraft`);
+    if (task.attachments !== undefined) {
+      const attachmentIds = list(task.attachments, `${path}.attachments`).map(
+        (entry) => {
+          validateAttachment(entry);
+          return entry.id;
+        },
+      );
+      unique(attachmentIds, `${path}.attachments`);
+    }
     return taskId;
   });
   unique(taskIds, "tasks");
@@ -255,7 +267,7 @@ export async function exportBackup(): Promise<string | null> {
   if (!data) throw new Error("Пока нет сохранённых данных.");
   return download(
     "potom-backup.json",
-    JSON.stringify(data, null, 2),
+    JSON.stringify(data),
     "application/json",
   );
 }

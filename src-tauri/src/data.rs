@@ -183,6 +183,24 @@ pub fn validate(data: &Value) -> Result<(), String> {
             return Err(error(&path, "неизвестный приоритет"));
         }
         string(&task["description"], &format!("{path}.description"))?;
+        if let Some(draft) = task.get("commentDraft") {
+            string(draft, &format!("{path}.commentDraft"))?;
+        }
+        if let Some(attachments) = task.get("attachments") {
+            let mut attachment_ids = HashSet::new();
+            for (attachment_index, attachment) in
+                array(attachments, &format!("{path}.attachments"))?
+                    .iter()
+                    .enumerate()
+            {
+                let attachment_path = format!("{path}.attachments[{attachment_index}]");
+                let id = crate::attachments::validate_value(attachment)
+                    .map_err(|reason| error(&attachment_path, &reason))?;
+                if !attachment_ids.insert(id) {
+                    return Err(error(&attachment_path, "повторяющийся id вложения"));
+                }
+            }
+        }
         date(&task["due"], &format!("{path}.due"), true)?;
         date(&task["created"], &format!("{path}.created"), false)?;
         if let Some(completed) = task.get("completedAt") {
@@ -327,5 +345,45 @@ mod tests {
         bad["tasks"][0]["due"] = json!("2026-02-30");
         assert!(validate(&bad).is_err());
         assert!(parse_archive(b"broken json").is_err());
+    }
+
+    #[test]
+    fn old_archives_without_attachments_keep_notes_and_do_not_gain_new_fields() {
+        let original = fixture();
+        let parsed = parse_archive(&serde_json::to_vec(&original).unwrap()).unwrap();
+        assert!(!parsed.migrated);
+        assert_eq!(parsed.data, original);
+        assert!(parsed.data["tasks"][0].get("attachments").is_none());
+        assert!(parsed.data["tasks"][0].get("commentDraft").is_none());
+        assert_eq!(
+            parsed.data["tasks"][0]["notes"],
+            original["tasks"][0]["notes"]
+        );
+    }
+
+    #[test]
+    fn optional_attachments_and_comment_draft_are_validated_without_rewriting_notes() {
+        let mut data = fixture();
+        let original_notes = data["tasks"][0]["notes"].clone();
+        let attachment = json!({
+            "id": "123e4567-e89b-42d3-a456-426614174000", "name": "Файл.bin",
+            "size": 1, "mime": "application/octet-stream", "data": "AA==", "added": "2026-10-22"
+        });
+        data["tasks"][0]["attachments"] = json!([attachment.clone()]);
+        data["tasks"][0]["commentDraft"] = json!("  Черновик комментария\n\n**Текст**  ");
+        let parsed = parse_archive(&serde_json::to_vec(&data).unwrap()).unwrap();
+        assert_eq!(parsed.data, data);
+        assert_eq!(parsed.data["tasks"][0]["notes"], original_notes);
+
+        let mut duplicate = data.clone();
+        duplicate["tasks"][0]["attachments"] = json!([attachment.clone(), attachment]);
+        assert!(validate(&duplicate).is_err());
+        for malformed in [json!({}), json!(null), json!([{}])] {
+            let mut malformed_data = data.clone();
+            malformed_data["tasks"][0]["attachments"] = malformed;
+            assert!(validate(&malformed_data).is_err());
+        }
+        data["tasks"][0]["commentDraft"] = json!(42);
+        assert!(validate(&data).is_err());
     }
 }

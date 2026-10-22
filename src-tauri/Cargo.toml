@@ -1,6 +1,6 @@
 [package]
 name = "potom"
-version = "0.1.2"
+version = "0.2.0"
 description = "потом. — персональный задачник"
 edition = "2024"
 rust-version = "1.90"
@@ -13,6 +13,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "0.22"
 tauri = { version = "2", features = [] }
 tauri-plugin-single-instance = "2"
 tauri-plugin-window-state = "2"

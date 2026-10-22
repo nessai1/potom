@@ -51,7 +51,10 @@ import {
   getStorageInfo,
   isDesktop,
   flushBrowserData,
+  parseArchive,
 } from "./lib/storage";
+import { MAX_WORKSPACE_BYTES, readAttachmentFiles } from "./lib/attachments";
+import { catRemarks } from "./model/cat-remarks";
 import { createInitialData } from "./model/initial-data";
 import {
   listenQuickTasks,
@@ -94,18 +97,6 @@ const viewNames: Record<View, string> = {
   calendar: "Календарь",
   achievements: "Достижения",
 };
-const remarks = [
-  "Лапки есть. ТЗ нет.",
-  "Мяу. Бизнес опять насрал в требования.",
-  "Созвон на пять минут? Пиздёж.",
-  "Погладь кота. Таску трогать страшнее.",
-  "Я не токсичная. Я читала этот бэклог.",
-  "Мур. Теперь закрой эту херню.",
-  "У меня девять жизней. У тебя один дедлайн.",
-  "Кусь за «там просто кнопочку».",
-  "Требования уточнили. Я охуела уточнённо.",
-  "Котик хочет спать. Бизнес хочет всё.",
-];
 const saveLabels: Record<SaveState, string> = {
   loading: "Загружаем данные…",
   saving: "Сохраняем изменения…",
@@ -139,6 +130,8 @@ export default function App() {
     } | null>(null),
     [busy, setBusy] = useState(false);
   const initializing = useRef(false);
+  const workspaceGeneration = useRef(0);
+  const pendingAttachments = useRef(new Set<Promise<void>>());
   const pendingQuickTask = useRef<number | null>(null);
   const publishedQuickState = useRef("");
   const [, setCurrentDay] = useState(todayKey);
@@ -222,12 +215,75 @@ export default function App() {
     (id, update) => mutate((current) => reduceTask(current, id, update)),
     [mutate],
   );
+  const readAndAddAttachments = useCallback(
+    async (id: number, files: File[]) => {
+      if (!files.length) return;
+      const generation = workspaceGeneration.current;
+      const before = dataRef.current;
+      if (!before?.tasks.some((task) => task.id === id))
+        throw new Error("Задача уже удалена.");
+      const encodedBytes = files.reduce(
+        (sum, file) => sum + Math.ceil(file.size / 3) * 4,
+        0,
+      );
+      if (
+        new TextEncoder().encode(JSON.stringify(before)).byteLength +
+          encodedBytes >
+        MAX_WORKSPACE_BYTES
+      )
+        throw new Error(
+          "Недостаточно места: размер пространства с вложениями не должен превышать 50 МБ.",
+        );
+      const attachments = await readAttachmentFiles(files);
+      flushEditors();
+      const current = dataRef.current;
+      if (
+        generation !== workspaceGeneration.current ||
+        !current?.tasks.some((task) => task.id === id)
+      )
+        throw new Error(
+          "Пространство изменилось. Откройте задачу и прикрепите файлы заново.",
+        );
+      const candidate = {
+        ...current,
+        tasks: current.tasks.map((task) =>
+          task.id === id
+            ? {
+                ...task,
+                attachments: [...(task.attachments ?? []), ...attachments],
+              }
+            : task,
+        ),
+      };
+      // Validate the complete workspace before committing any part of a batch.
+      parseArchive(JSON.stringify(candidate));
+      mutate(() => candidate);
+    },
+    [mutate],
+  );
+  const addAttachments = useCallback(
+    (id: number, files: File[]) => {
+      const pending = readAndAddAttachments(id, files);
+      pendingAttachments.current.add(pending);
+      const finish = () => {
+        pendingAttachments.current.delete(pending);
+      };
+      void pending.then(finish, (error: unknown) => {
+        finish();
+        inform(`Файлы не прикреплены: ${errorText(error)}`);
+      });
+      return pending;
+    },
+    [readAndAddAttachments, inform],
+  );
   const event = useCallback(
     (name: string) => mutate((current) => recordEvent(current, name)),
     [mutate],
   );
   const flush = useCallback(async () => {
     flushEditors();
+    while (pendingAttachments.current.size)
+      await Promise.all([...pendingAttachments.current]);
     await persist();
   }, [persist]);
   const init = useCallback(async () => {
@@ -241,6 +297,7 @@ export default function App() {
       const changed =
         !loaded ||
         JSON.stringify(next.unlocked) !== JSON.stringify(loaded.unlocked);
+      workspaceGeneration.current++;
       dataRef.current = next;
       version.current = 1;
       savedVersion.current = changed ? 0 : 1;
@@ -322,6 +379,11 @@ export default function App() {
     }
     const beforeUnload = (event: BeforeUnloadEvent) => {
       flushEditors();
+      if (pendingAttachments.current.size) {
+        event.preventDefault();
+        event.returnValue = "";
+        return;
+      }
       if (
         !isDesktop() &&
         dataRef.current &&
@@ -505,7 +567,21 @@ export default function App() {
       created: todayKey(),
     };
     delete copy.completedAt;
-    mutate((current) => ({ ...current, tasks: [...current.tasks, copy] }));
+    const current = dataRef.current!;
+    const candidate = evaluateAchievements({
+      ...current,
+      tasks: [...current.tasks, copy],
+    });
+    if (
+      new TextEncoder().encode(JSON.stringify(candidate)).byteLength >
+      MAX_WORKSPACE_BYTES
+    ) {
+      inform(
+        "Не удалось создать копию: пространство с вложениями превысит 50 МБ.",
+      );
+      return;
+    }
+    mutate(() => candidate);
     setSelectedId(copy.id);
     inform("Копия задачи создана");
   };
@@ -521,6 +597,7 @@ export default function App() {
       const imported = await importBackup();
       if (imported) {
         const next = evaluateAchievements(imported);
+        workspaceGeneration.current++;
         dataRef.current = next;
         version.current++;
         savedVersion.current =
@@ -564,6 +641,7 @@ export default function App() {
     try {
       if (dataRef.current) await flush();
       const next = await resetData();
+      workspaceGeneration.current++;
       dataRef.current = next;
       version.current++;
       savedVersion.current = version.current;
@@ -784,7 +862,7 @@ export default function App() {
             <button
               className="sidebar-cat-card"
               onClick={() => {
-                setCatIndex((catIndex + 1) % remarks.length);
+                setCatIndex((index) => (index + 1) % catRemarks.length);
                 event("catPets");
               }}
               title="Потыкать кота"
@@ -807,7 +885,11 @@ export default function App() {
                   }
                 />
               </span>
-              <span className="cat-bubble">{clean(remarks[catIndex])}</span>
+              <span className="cat-bubble">
+                {data.settings.cleanLanguage
+                  ? catRemarks[catIndex].clean
+                  : catRemarks[catIndex].text}
+              </span>
               <small>Кот-аналитик · нажми на морду</small>
             </button>
             <button
@@ -1046,6 +1128,7 @@ export default function App() {
           onDuplicate={duplicate}
           onDelete={confirmDelete}
           onEvent={event}
+          onAddAttachments={addAttachments}
         />
       )}
       {modal?.kind === "new" && (
@@ -1073,6 +1156,7 @@ export default function App() {
               id,
               checklist: [],
               notes: [],
+              attachments: [],
               created: todayKey(),
             };
             const desiredStatus = next.status;
@@ -1136,7 +1220,7 @@ export default function App() {
         <Dialog title="Удалить задачу?" onClose={closeModal}>
           <p>
             Задача «{data.tasks.find((t) => t.id === modal.id)?.title}», её
-            чеклист и документы будут удалены.
+            чеклист, комментарии и вложения будут удалены.
           </p>
           <div className="modal-footer">
             <button className="secondary-btn" onClick={closeModal}>
@@ -1146,6 +1230,7 @@ export default function App() {
               className="danger-btn"
               onClick={() => {
                 const id = modal.id;
+                workspaceGeneration.current++;
                 mutate((current) => ({
                   ...current,
                   tasks: current.tasks.filter((t) => t.id !== id),
@@ -1237,8 +1322,8 @@ export default function App() {
           <div className="backup-section">
             <h3>Резервная копия</h3>
             <p>
-              Сохраните задачи, проекты, документы и настройки в JSON. Импорт
-              заменяет текущее пространство.
+              Сохраните задачи, проекты, комментарии, файлы и настройки в JSON.
+              Импорт заменяет текущее пространство.
             </p>
             <div className="backup-actions">
               <button
@@ -1301,8 +1386,9 @@ export default function App() {
       {modal?.kind === "import" && (
         <Dialog title="Восстановить резервную копию?" onClose={closeModal}>
           <p>
-            Задачи, проекты, документы и настройки будут заменены данными из
-            выбранного JSON. Сначала можно экспортировать текущее пространство.
+            Задачи, проекты, комментарии, файлы и настройки будут заменены
+            данными из выбранного JSON. Сначала можно экспортировать текущее
+            пространство.
           </p>
           <div className="backup-actions">
             <button
@@ -1338,7 +1424,7 @@ export default function App() {
         <Dialog title="Лапки есть. Инструкция тоже." onClose={closeModal}>
           <p>
             Личный планнер без регистрации и обязательного интернета. Задачи,
-            канбан, календарь и Markdown-документы живут в одном пространстве.
+            канбан, календарь, комментарии и файлы живут в одном пространстве.
           </p>
           <Shortcuts />
           <p>
@@ -1408,8 +1494,8 @@ function ResetData({
   return (
     <Dialog title="Начать с чистого листа?" onClose={onClose}>
       <p>
-        Все задачи, проекты и документы исчезнут из текущего пространства.
-        Достижения и настройки вернутся к начальному состоянию.
+        Все задачи, проекты, комментарии и файлы исчезнут из текущего
+        пространства. Достижения и настройки вернутся к начальному состоянию.
       </p>
       <p>
         Перед сбросом сохраним резервную копию <b>before-reset</b> в папке
@@ -1718,7 +1804,7 @@ function DeleteProject({
       <p>
         Проект «{project.name}» будет удалён.
         {taskCount > 0
-          ? ` Задачи (${taskCount}) и их документы сохранятся в другом проекте.`
+          ? ` Задачи (${taskCount}) с комментариями и файлами сохранятся в другом проекте.`
           : ""}
       </p>
       {taskCount > 0 && (

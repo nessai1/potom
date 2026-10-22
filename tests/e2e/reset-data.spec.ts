@@ -193,7 +193,7 @@ test("подтверждённый сброс очищает данные, об�
   await expect(compact).toContainText("0");
 });
 
-test("сброс архивирует свежий Markdown и отложенные сохранения не возвращают задачи", async ({
+test("сброс архивирует свежий черновик комментария и отложенное сохранение не возвращает задачи", async ({
   page,
 }) => {
   await page.clock.install();
@@ -201,14 +201,10 @@ test("сброс архивирует свежий Markdown и отложенн�
     .getByText("Активная задача перед сбросом", { exact: true })
     .click();
   const dialog = page.getByRole("dialog");
-  await dialog.getByRole("tab", { name: /Заметки/ }).click();
-  await dialog
-    .getByRole("button", { name: "Исходный Markdown", exact: true })
-    .click();
   const markdown =
     "# Последние изменения\n\nЭтот буфер появился прямо перед сбросом.";
   await dialog
-    .getByRole("textbox", { name: /исходный Markdown/i })
+    .getByRole("textbox", { name: "Комментарий", exact: true })
     .fill(markdown);
   await page.keyboard.press("Escape");
   await openReset(page);
@@ -216,8 +212,7 @@ test("сброс архивирует свежий Markdown и отложенн�
   const backups = await resetBackups(page);
   expect(backups).toHaveLength(1);
   expect(
-    backups[0].tasks.find((task: { id: number }) => task.id === 1).notes[0]
-      .text,
+    backups[0].tasks.find((task: { id: number }) => task.id === 1).commentDraft,
   ).toBe(markdown);
   expectEmpty(await storedData(page));
   await page.clock.fastForward(2_000);

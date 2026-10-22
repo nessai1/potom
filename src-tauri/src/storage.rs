@@ -235,7 +235,9 @@ impl Store {
         let value = self
             .load()?
             .ok_or_else(|| "Пока нет сохранённых данных.".to_string())?;
-        serde_json::to_vec_pretty(&value).map_err(io_error)
+        // Storage and imports use the same 50 MiB byte limit. Pretty-printing
+        // could make a valid full workspace too large to restore from its export.
+        serde_json::to_vec(&value).map_err(io_error)
     }
 
     pub fn import(&mut self, bytes: &[u8]) -> Result<Value, String> {
@@ -360,6 +362,22 @@ mod tests {
             data
         );
         assert!(fs::read_dir(reopened.backups()).unwrap().count() > 0);
+    }
+
+    #[test]
+    fn a_workspace_at_the_archive_limit_exports_within_the_same_restorable_limit() {
+        let mut data = fixture();
+        data["tasks"][0]["description"] = json!("");
+        let overhead = serde_json::to_vec(&data).unwrap().len();
+        data["tasks"][0]["description"] = json!("x".repeat(MAX_ARCHIVE_BYTES as usize - overhead));
+        let directory = tempfile::tempdir().unwrap();
+        let mut store = Store::new(directory.path().into());
+        store.save(&data).unwrap();
+        let exported = store.export().unwrap();
+        assert_eq!(exported.len() as u64, MAX_ARCHIVE_BYTES);
+        let restored = parse_archive(&exported).unwrap();
+        assert!(!restored.migrated);
+        assert_eq!(restored.data, data);
     }
 
     #[test]

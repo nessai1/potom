@@ -12,6 +12,14 @@ export interface TaskNote {
   date: string;
   title?: string;
 }
+export interface TaskAttachment {
+  id: string;
+  name: string;
+  size: number;
+  mime: string;
+  data: string;
+  added: string;
+}
 export interface Task {
   id: number;
   title: string;
@@ -22,6 +30,8 @@ export interface Task {
   description: string;
   checklist: ChecklistItem[];
   notes: TaskNote[];
+  commentDraft?: string;
+  attachments?: TaskAttachment[];
   created: string;
   completedAt?: string;
 }
@@ -57,4 +67,5 @@ export interface TaskDetailProps {
   onDuplicate: (id: number) => void;
   onDelete: (id: number) => void;
   onEvent: (name: string) => void;
+  onAddAttachments: (id: number, files: File[]) => Promise<void>;
 }

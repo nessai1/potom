@@ -1,3 +1,4 @@
+mod attachments;
 mod data;
 mod quick_tasks;
 mod storage;
@@ -185,6 +186,30 @@ async fn export_markdown(name: String, text: String) -> Result<Option<String>, S
 }
 
 #[tauri::command]
+async fn save_attachment(
+    window: tauri::WebviewWindow,
+    attachment: attachments::Attachment,
+) -> Result<Option<String>, String> {
+    if window.label() != "main" {
+        return Err("Сохранить вложение можно только из главного окна.".into());
+    }
+    let bytes = attachment
+        .decoded_bytes()
+        .map_err(|reason| format!("Не удалось сохранить вложение: {reason}."))?;
+    // No AppStore mutex is held while choosing a destination or writing the file.
+    let Some(file) = rfd::AsyncFileDialog::new()
+        .set_title("Сохранить вложение")
+        .set_file_name(&attachment.name)
+        .save_file()
+        .await
+    else {
+        return Ok(None);
+    };
+    storage::export_file(file.path(), &bytes)?;
+    Ok(Some(file.path().to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
 fn open_external(url: String) -> Result<(), String> {
     let parsed = url::Url::parse(&url).map_err(|_| "Некорректная ссылка.".to_string())?;
     if !["http", "https"].contains(&parsed.scheme())
@@ -230,6 +255,7 @@ pub fn run() {
             import_backup,
             get_storage_info,
             export_markdown,
+            save_attachment,
             open_external,
             finish_quit,
             quick_tasks::set_quick_tasks_expanded,
