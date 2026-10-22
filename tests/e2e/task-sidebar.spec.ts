@@ -68,6 +68,24 @@ async function openTask(page: Page) {
   await expect(
     dialog.getByLabel("Название задачи", { exact: true }),
   ).toHaveValue(TITLE);
+  await dialog.evaluate(async (node) => {
+    await document.fonts.ready;
+    // Actionability can see two unchanged compositor frames before entry ends.
+    // Measure only after its real finish and the resulting layout has painted.
+    await Promise.all(
+      node
+        .getAnimations()
+        .filter(
+          (animation) =>
+            animation instanceof CSSAnimation &&
+            animation.animationName === "task-dialog-enter",
+        )
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+    });
+  });
   await dialog
     .getByRole("button", { name: "Закрыть задачу", exact: true })
     .hover();

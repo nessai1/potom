@@ -11,11 +11,17 @@ const colors = {
   dark: ["#733a57", "#86523d", "#373c46", "#4e414b"],
 };
 
-let supportsWebGL: boolean | undefined;
+interface ShaderCapabilities {
+  available: boolean;
+  maxPixelCount: number;
+}
 
-function canRenderShader() {
-  if (supportsWebGL !== undefined) return supportsWebGL;
-  if (typeof WebGL2RenderingContext === "undefined") return false;
+let shaderCapabilities: ShaderCapabilities | undefined;
+
+function getShaderCapabilities(): ShaderCapabilities {
+  if (shaderCapabilities) return shaderCapabilities;
+  const fallback = { available: false, maxPixelCount: 96_000 };
+  if (typeof WebGL2RenderingContext === "undefined") return fallback;
 
   try {
     const canvas = document.createElement("canvas");
@@ -24,19 +30,34 @@ function canRenderShader() {
       depth: false,
       stencil: false,
     });
-    supportsWebGL = context !== null;
+    if (!context) return (shaderCapabilities = fallback);
+    const info = context.getExtension("WEBGL_debug_renderer_info");
+    const renderer = String(
+      context.getParameter(info?.UNMASKED_RENDERER_WEBGL ?? context.RENDERER),
+    );
+    // Software WebGL shares the CPU with task editing and dragging. Render the
+    // same Paper shader at a smaller resolution so it cannot monopolize input.
+    const software =
+      /swiftshader|llvmpipe|softpipe|software|basic render/i.test(renderer);
+    shaderCapabilities = {
+      available: true,
+      maxPixelCount: software ? 96_000 : 1_000_000,
+    };
     context?.getExtension("WEBGL_lose_context")?.loseContext();
   } catch {
-    supportsWebGL = false;
+    shaderCapabilities = fallback;
   }
-  return supportsWebGL;
+  return shaderCapabilities;
 }
 
 export default function WorkspaceBackground({
   theme,
 }: WorkspaceBackgroundProps) {
   const root = useRef<HTMLDivElement>(null);
-  const [shaderAvailable, setShaderAvailable] = useState(false);
+  const [capabilities, setCapabilities] = useState<ShaderCapabilities>({
+    available: false,
+    maxPixelCount: 96_000,
+  });
   const [reducedMotion, setReducedMotion] = useState(
     () =>
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false,
@@ -45,7 +66,7 @@ export default function WorkspaceBackground({
   const [inViewport, setInViewport] = useState(true);
 
   useEffect(() => {
-    setShaderAvailable(canRenderShader());
+    setCapabilities(getShaderCapabilities());
     const media = window.matchMedia?.("(prefers-reduced-motion: reduce)");
     const updateMotion = () => setReducedMotion(media?.matches ?? false);
     const updateVisibility = () => setVisible(!document.hidden);
@@ -55,7 +76,8 @@ export default function WorkspaceBackground({
     document.addEventListener("visibilitychange", updateVisibility);
 
     const node = root.current;
-    const useFallback = () => setShaderAvailable(false);
+    const useFallback = () =>
+      setCapabilities((current) => ({ ...current, available: false }));
     node?.addEventListener("webglcontextlost", useFallback, true);
     node?.addEventListener("webglcontextcreationerror", useFallback, true);
 
@@ -83,10 +105,10 @@ export default function WorkspaceBackground({
       ref={root}
       className="workspace-background"
       aria-hidden="true"
-      data-renderer={shaderAvailable ? "mesh-gradient" : "fallback"}
-      data-motion={shaderAvailable && playing ? "playing" : "paused"}
+      data-renderer={capabilities.available ? "mesh-gradient" : "fallback"}
+      data-motion={capabilities.available && playing ? "playing" : "paused"}
     >
-      {shaderAvailable && (
+      {capabilities.available && (
         <MeshGradient
           className="workspace-shader"
           colors={colors[theme]}
@@ -98,7 +120,7 @@ export default function WorkspaceBackground({
           width="100%"
           height="100%"
           minPixelRatio={1}
-          maxPixelCount={1_000_000}
+          maxPixelCount={capabilities.maxPixelCount}
         />
       )}
     </div>

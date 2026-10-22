@@ -734,6 +734,46 @@ test("Paper Mesh Gradient движется в обеих темах, кот пр
   expect(stopped[1]).toBe(stopped[0]);
 });
 
+test("программная графика сохраняет живой Paper Shader с ограниченным разрешением", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const original = WebGL2RenderingContext.prototype.getParameter;
+    WebGL2RenderingContext.prototype.getParameter = function (parameter) {
+      if (parameter === 0x9246 || parameter === this.RENDERER)
+        return "ANGLE (Google SwiftShader)";
+      return original.call(this, parameter);
+    };
+  });
+  await page.reload();
+  const background = page.locator(".workspace-background");
+  await expect(background).toHaveAttribute("data-renderer", "mesh-gradient");
+  await expect(background).toHaveAttribute("data-motion", "playing");
+  const canvas = background.locator("canvas");
+  await expect(canvas).toBeVisible();
+  await expect
+    .poll(() => canvas.evaluate((node) => node.width * node.height))
+    .toBeGreaterThan(0);
+  expect(
+    await canvas.evaluate((node) => node.width * node.height),
+  ).toBeLessThan(97_000);
+  const shader = background.locator(".workspace-shader");
+  const frame = () =>
+    shader.evaluate((node) =>
+      (
+        node as HTMLElement & {
+          paperShaderMount: { getCurrentFrame: () => number };
+        }
+      ).paperShaderMount.getCurrentFrame(),
+    );
+  const before = await frame();
+  await expect.poll(frame).toBeGreaterThan(before + 100);
+  await openTask(page);
+  await expect(
+    page.getByRole("textbox", { name: "Название задачи", exact: true }),
+  ).toHaveValue(TASK_TITLE);
+});
+
 test("без WebGL2 приложение сохраняет фон и доступность задач", async ({
   page,
 }) => {
