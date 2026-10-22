@@ -624,39 +624,75 @@ test("ошибка чтения после закрытия задачи вид�
   expect(errors).toEqual([]);
 });
 
-test("градиент виден в обеих темах, кот проходит 110 разных фраз без мата", async ({
+test("Paper Mesh Gradient движется в обеих темах, кот проходит 110 разных фраз без мата", async ({
   page,
 }) => {
-  const main = page.getByRole("main");
-  async function expectMovingGradient() {
-    const positions = await main.evaluate((node) => {
-      const animation = node.getAnimations()[0];
-      if (!animation) return null;
-      animation.pause();
-      animation.currentTime = 0;
-      const from = getComputedStyle(node).backgroundPosition;
-      animation.currentTime = 13_000;
-      const to = getComputedStyle(node).backgroundPosition;
-      return { from, to };
+  const background = page.locator(".workspace-background");
+  const shader = background.locator(".workspace-shader");
+  const currentFrame = () =>
+    shader.evaluate((node) => {
+      const mount = (
+        node as HTMLElement & {
+          paperShaderMount?: { getCurrentFrame: () => number };
+        }
+      ).paperShaderMount;
+      return mount?.getCurrentFrame() ?? -1;
     });
-    expect(positions).not.toBeNull();
-    expect(positions!.to).not.toBe(positions!.from);
+  async function expectMovingGradient() {
+    await expect(background).toHaveAttribute("data-motion", "playing");
+    await expect.poll(currentFrame).toBeGreaterThanOrEqual(0);
+    const before = await currentFrame();
+    await expect.poll(currentFrame).toBeGreaterThan(before + 100);
   }
-  await expect(main).toHaveCSS("background-image", /radial-gradient/);
+  await expect(background).toHaveAttribute("data-renderer", "mesh-gradient");
+  await expect(background.locator("canvas")).toBeVisible();
   await expectMovingGradient();
-  const light = await main.evaluate(
-    (node) => getComputedStyle(node).backgroundImage,
-  );
+  await shader.evaluate((node) => {
+    const mount = (
+      node as HTMLElement & {
+        paperShaderMount?: {
+          setSpeed: (n: number) => void;
+          setFrame: (n: number) => void;
+        };
+      }
+    ).paperShaderMount;
+    mount?.setSpeed(0);
+    mount?.setFrame(0);
+  });
+  const light = await background.screenshot();
   await page.screenshot({ path: "/tmp/potom-activity-main-light.png" });
   await page.getByRole("button", { name: /тёмную тему|Сменить тему/ }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
-  await expect(main).toHaveCSS("background-image", /radial-gradient/);
-  const dark = await main.evaluate(
-    (node) => getComputedStyle(node).backgroundImage,
-  );
-  expect(dark).not.toBe(light);
+  await shader.evaluate((node) => {
+    (
+      node as HTMLElement & {
+        paperShaderMount?: { setSpeed: (n: number) => void };
+      }
+    ).paperShaderMount?.setSpeed(0.78);
+  });
   await expectMovingGradient();
+  await shader.evaluate((node) => {
+    const mount = (
+      node as HTMLElement & {
+        paperShaderMount?: {
+          setSpeed: (n: number) => void;
+          setFrame: (n: number) => void;
+        };
+      }
+    ).paperShaderMount;
+    mount?.setSpeed(0);
+    mount?.setFrame(0);
+  });
+  const dark = await background.screenshot();
+  expect(dark.equals(light)).toBe(false);
   await page.screenshot({ path: "/tmp/potom-activity-main-dark.png" });
+  await shader.evaluate((node) => {
+    (
+      node as HTMLElement & {
+        paperShaderMount?: { setSpeed: (n: number) => void };
+      }
+    ).paperShaderMount?.setSpeed(0.78);
+  });
   await expect(page.locator("html")).toHaveAttribute(
     "data-clean-language",
     "true",
@@ -677,5 +713,46 @@ test("градиент виден в обеих темах, кот проход�
   expect(new Set(phrases).size).toBe(110);
   await expect(bubble).toHaveText(first);
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await expect(main).toHaveCSS("animation-name", "none");
+  await expect(background).toHaveAttribute("data-motion", "paused");
+  const stopped = await shader.evaluate(async (node) => {
+    const mount = (
+      node as HTMLElement & {
+        paperShaderMount?: { getCurrentFrame: () => number };
+      }
+    ).paperShaderMount!;
+    const before = mount.getCurrentFrame();
+    await new Promise<void>((resolve) => {
+      let remaining = 8;
+      const frame = () => {
+        if (--remaining) requestAnimationFrame(frame);
+        else resolve();
+      };
+      requestAnimationFrame(frame);
+    });
+    return [before, mount.getCurrentFrame()];
+  });
+  expect(stopped[1]).toBe(stopped[0]);
+});
+
+test("без WebGL2 приложение сохраняет фон и доступность задач", async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "WebGL2RenderingContext", {
+      value: undefined,
+      configurable: true,
+    });
+  });
+  await page.reload();
+  const background = page.locator(".workspace-background");
+  await expect(background).toHaveAttribute("data-renderer", "fallback");
+  await expect(background).toHaveCSS("background-image", /linear-gradient/);
+  await expect(background.locator("canvas")).toHaveCount(0);
+  await openTask(page);
+  await expect(
+    page.getByRole("textbox", { name: "Название задачи", exact: true }),
+  ).toHaveValue(TASK_TITLE);
+  expect(errors).toEqual([]);
 });

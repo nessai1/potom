@@ -121,6 +121,42 @@ describe("archive validation and safe storage", () => {
     expect(() => parseArchive(JSON.stringify(metric))).toThrow();
   });
 
+  it("preserves optional archive and completion time fields while reading legacy tasks unchanged", () => {
+    const legacy = fixture();
+    expect(parseArchive(JSON.stringify(legacy))).toEqual(legacy);
+    for (const time of [0, Date.now(), Number.MAX_SAFE_INTEGER]) {
+      const archived = fixture();
+      archived.tasks[0] = {
+        ...archived.tasks[0],
+        status: "done",
+        archived: true,
+        completedAtTime: time,
+      };
+      expect(parseArchive(JSON.stringify(archived))).toEqual(archived);
+    }
+    const active = fixture();
+    active.tasks[0].archived = false;
+    expect(parseArchive(JSON.stringify(active))).toEqual(active);
+  });
+
+  it("rejects invalid archive flags, unsafe completion timestamps and active tasks with done-only metadata", () => {
+    for (const patch of [
+      { archived: true },
+      { status: "done", archived: 1 },
+      { status: "done", archived: null },
+      { completedAtTime: 0 },
+      { status: "done", completedAtTime: -1 },
+      { status: "done", completedAtTime: 1.5 },
+      { status: "done", completedAtTime: Number.MAX_SAFE_INTEGER + 1 },
+      { status: "done", completedAtTime: "1000" },
+      { status: "done", completedAtTime: null },
+    ]) {
+      const invalid = fixture();
+      Object.assign(invalid.tasks[0], patch);
+      expect(() => parseArchive(JSON.stringify(invalid))).toThrow();
+    }
+  });
+
   it("propagates quota errors and retains the previously committed state", async () => {
     const data = fixture();
     await saveData(data);

@@ -11,6 +11,23 @@
 .task-activity-header .task-save-indicator {
   margin-left: auto;
 }
+@media (min-width: 801px) {
+  .task-dialog-body {
+    display: flex;
+    overflow: hidden;
+  }
+  .task-overview {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+  .task-main-content,
+  .task-sidebar {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+}
 .task-comments .task-section-heading h3,
 .task-attachments .task-section-heading h3 {
   display: inline-flex;

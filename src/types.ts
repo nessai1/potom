@@ -34,6 +34,8 @@ export interface Task {
   attachments?: TaskAttachment[];
   created: string;
   completedAt?: string;
+  completedAtTime?: number;
+  archived?: boolean;
 }
 export interface Project {
   id: string;

@@ -1,0 +1,11 @@
+/* Each status ends after its own cards, rather than sharing the legacy 430px floor. */
+.kanban-board > .kanban-col {
+  align-self: start;
+  height: auto;
+  min-height: 0;
+}
+
+/* Keep an empty status easy to target with the pointer and keyboard. */
+.kanban-board > .kanban-col.is-empty {
+  min-height: 144px;
+}

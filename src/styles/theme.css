@@ -154,58 +154,6 @@ textarea::placeholder {
 main {
   background: var(--theme-base);
 }
-.app-shell .workspace-body > main {
-  background: var(--theme-workspace-background);
-  background-size:
-    160px 160px,
-    190% 190%,
-    185% 185%,
-    180% 180%,
-    180% 180%;
-  background-repeat: repeat, no-repeat, no-repeat, no-repeat, no-repeat;
-  background-position:
-    0px 0px,
-    0% 10%,
-    100% 20%,
-    40% 100%,
-    0% 50%;
-  animation: workspace-gradient-drift 14s ease-in-out infinite alternate;
-}
-@keyframes workspace-gradient-drift {
-  from {
-    background-position:
-      0px 0px,
-      0% 10%,
-      100% 20%,
-      40% 100%,
-      0% 50%;
-  }
-  to {
-    background-position:
-      0px 0px,
-      100% 75%,
-      0% 90%,
-      85% 0%,
-      100% 50%;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .app-shell .workspace-body > main {
-    animation: none;
-    background-size:
-      160px 160px,
-      100% 100%,
-      100% 100%,
-      100% 100%,
-      100% 100%;
-    background-position:
-      0px 0px,
-      center,
-      center,
-      center,
-      center;
-  }
-}
 .page-top h1 {
   color: var(--theme-heading);
 }

@@ -2,7 +2,7 @@ use serde_json::{Value, json};
 use std::collections::HashSet;
 
 pub const MAX_ARCHIVE_BYTES: u64 = 50 * 1024 * 1024;
-const MAX_SAFE_ID: u64 = 9_007_199_254_740_991;
+const MAX_SAFE_INTEGER: u64 = 9_007_199_254_740_991;
 
 pub struct Archive {
     pub data: Value,
@@ -28,7 +28,7 @@ fn array<'a>(value: &'a Value, path: &str) -> Result<&'a Vec<Value>, String> {
 fn id(value: &Value, path: &str) -> Result<u64, String> {
     value
         .as_u64()
-        .filter(|id| *id > 0 && *id <= MAX_SAFE_ID)
+        .filter(|id| *id > 0 && *id <= MAX_SAFE_INTEGER)
         .ok_or_else(|| error(path, "ожидался положительный целый идентификатор"))
 }
 
@@ -205,6 +205,29 @@ pub fn validate(data: &Value) -> Result<(), String> {
         date(&task["created"], &format!("{path}.created"), false)?;
         if let Some(completed) = task.get("completedAt") {
             date(completed, &format!("{path}.completedAt"), false)?;
+        }
+        if let Some(archived) = task.get("archived") {
+            if !archived.is_boolean() {
+                return Err(error(
+                    &format!("{path}.archived"),
+                    "ожидался флаг true/false",
+                ));
+            }
+            if archived.as_bool() == Some(true) && task["status"].as_str() != Some("done") {
+                return Err(error(
+                    &format!("{path}.archived"),
+                    "в архиве может находиться только выполненная задача",
+                ));
+            }
+        }
+        if let Some(time) = task.get("completedAtTime")
+            && (task["status"].as_str() != Some("done")
+                || !time.as_u64().is_some_and(|time| time <= MAX_SAFE_INTEGER))
+        {
+            return Err(error(
+                &format!("{path}.completedAtTime"),
+                "ожидалось целое неотрицательное время завершённой задачи",
+            ));
         }
         for (item_index, item) in array(&task["checklist"], &format!("{path}.checklist"))?
             .iter()
@@ -385,5 +408,53 @@ mod tests {
         }
         data["tasks"][0]["commentDraft"] = json!(42);
         assert!(validate(&data).is_err());
+    }
+
+    #[test]
+    fn optional_archive_metadata_roundtrips_and_legacy_tasks_remain_unchanged() {
+        let original = fixture();
+        assert_eq!(
+            parse_archive(&serde_json::to_vec(&original).unwrap())
+                .unwrap()
+                .data,
+            original
+        );
+        for time in [0, 1_792_670_400_000, MAX_SAFE_INTEGER] {
+            let mut archived = fixture();
+            archived["tasks"][0]["status"] = json!("done");
+            archived["tasks"][0]["archived"] = json!(true);
+            archived["tasks"][0]["completedAtTime"] = json!(time);
+            assert_eq!(
+                parse_archive(&serde_json::to_vec(&archived).unwrap())
+                    .unwrap()
+                    .data,
+                archived
+            );
+        }
+        let mut active = fixture();
+        active["tasks"][0]["archived"] = json!(false);
+        assert!(validate(&active).is_ok());
+    }
+
+    #[test]
+    fn invalid_archive_flags_or_completion_times_are_rejected() {
+        for patch in [
+            json!({"archived":true}),
+            json!({"status":"done","archived":1}),
+            json!({"status":"done","archived":null}),
+            json!({"completedAtTime":0}),
+            json!({"status":"done","completedAtTime":-1}),
+            json!({"status":"done","completedAtTime":1.5}),
+            json!({"status":"done","completedAtTime":MAX_SAFE_INTEGER + 1}),
+            json!({"status":"done","completedAtTime":"1000"}),
+            json!({"status":"done","completedAtTime":null}),
+        ] {
+            let mut invalid = fixture();
+            invalid["tasks"][0]
+                .as_object_mut()
+                .unwrap()
+                .extend(patch.as_object().unwrap().clone());
+            assert!(validate(&invalid).is_err(), "{patch}");
+        }
     }
 }

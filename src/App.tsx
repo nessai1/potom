@@ -33,6 +33,7 @@ import {
   AlertCircle,
   MoreHorizontal,
   Trash2,
+  Archive,
 } from "lucide-react";
 import type {
   AppData,
@@ -69,6 +70,7 @@ import {
   percent,
   recordEvent,
   updateTask as reduceTask,
+  archiveCompletedTasks,
 } from "./model/tasks";
 import { todayKey, plural } from "./model/dates";
 import { Cat, Garden } from "./components/TaskVisuals";
@@ -78,8 +80,10 @@ import ListView, { type ListTab } from "./views/ListView";
 import BoardView from "./views/BoardView";
 import CalendarView from "./views/CalendarView";
 import AchievementsView from "./views/AchievementsView";
+import WorkspaceBackground from "./components/WorkspaceBackground";
+import ArchiveView from "./views/ArchiveView";
 
-type View = "list" | "board" | "calendar" | "achievements";
+type View = "list" | "board" | "calendar" | "archive" | "achievements";
 type Modal =
   | { kind: "new"; project?: string; status?: Status; due?: string }
   | { kind: "project"; project?: Project }
@@ -95,6 +99,7 @@ const viewNames: Record<View, string> = {
   list: "Мои задачи",
   board: "Канбан",
   calendar: "Календарь",
+  archive: "Архив",
   achievements: "Достижения",
 };
 const saveLabels: Record<SaveState, string> = {
@@ -190,7 +195,7 @@ export default function App() {
     (recipe: (current: AppData) => AppData) => {
       if (!dataRef.current) return;
       const before = dataRef.current;
-      const after = evaluateAchievements(recipe(before));
+      const after = evaluateAchievements(archiveCompletedTasks(recipe(before)));
       if (before === after) return;
       dataRef.current = after;
       version.current++;
@@ -293,9 +298,12 @@ export default function App() {
     setSaveState("loading");
     try {
       const loaded = await loadData();
-      const next = evaluateAchievements(loaded ?? createInitialData());
+      const source = loaded ?? createInitialData();
+      const normalized = archiveCompletedTasks(source);
+      const next = evaluateAchievements(normalized);
       const changed =
         !loaded ||
+        normalized !== source ||
         JSON.stringify(next.unlocked) !== JSON.stringify(loaded.unlocked);
       workspaceGeneration.current++;
       dataRef.current = next;
@@ -567,6 +575,8 @@ export default function App() {
       created: todayKey(),
     };
     delete copy.completedAt;
+    delete copy.completedAtTime;
+    delete copy.archived;
     const current = dataRef.current!;
     const candidate = evaluateAchievements({
       ...current,
@@ -596,11 +606,13 @@ export default function App() {
       if (dataRef.current) await flush();
       const imported = await importBackup();
       if (imported) {
-        const next = evaluateAchievements(imported);
+        const normalized = archiveCompletedTasks(imported);
+        const next = evaluateAchievements(normalized);
         workspaceGeneration.current++;
         dataRef.current = next;
         version.current++;
         savedVersion.current =
+          normalized === imported &&
           JSON.stringify(next.unlocked) === JSON.stringify(imported.unlocked)
             ? version.current
             : version.current - 1;
@@ -743,6 +755,9 @@ export default function App() {
     name: clean(p.name),
   }));
   const visibleData = { ...data, projects: visibleProjects };
+  const archivedTasks = filterTasks(data, search, projectFilter, true)
+    .filter((t) => t.archived)
+    .map((t) => ({ ...t, title: clean(t.title) }));
   const tasks = filterTasks(data, search, projectFilter).map((t) => ({
       ...t,
       title: clean(t.title),
@@ -792,6 +807,7 @@ export default function App() {
                 ["list", ListChecks],
                 ["board", KanbanSquare],
                 ["calendar", CalendarDays],
+                ["archive", Archive],
                 ["achievements", Trophy],
               ] as const
             ).map(([key, Icon]) => (
@@ -806,6 +822,9 @@ export default function App() {
                 <span>{viewNames[key]}</span>
                 {key === "list" && (
                   <b>{data.tasks.filter((t) => t.status !== "done").length}</b>
+                )}
+                {key === "archive" && (
+                  <b>{data.tasks.filter((t) => t.archived).length}</b>
                 )}
                 {key === "achievements" && (
                   <span className="nav-achievement">
@@ -1045,6 +1064,7 @@ export default function App() {
             </div>
           )}
           <div className="workspace-body">
+            <WorkspaceBackground theme={data.settings.theme} />
             <main className={view === "list" ? "" : "view-wide"}>
               {projectFilter && view !== "list" && (
                 <div className="filter-chip">
@@ -1111,6 +1131,18 @@ export default function App() {
               )}
               {view === "achievements" && (
                 <AchievementsView data={data} clean={clean} />
+              )}
+              {view === "archive" && (
+                <ArchiveView
+                  tasks={archivedTasks}
+                  projects={visibleProjects}
+                  filtered={Boolean(search.trim() || projectFilter)}
+                  onOpen={openTask}
+                  onRestore={(id) => {
+                    updateTask(id, (t) => ({ ...t, status: "progress" }));
+                    inform("Задача возвращена в работу");
+                  }}
+                />
               )}
             </main>
           </div>
@@ -1189,7 +1221,7 @@ export default function App() {
             setSearch("");
             if (projectFilter && projectFilter !== next.project)
               setProjectFilter("");
-            if (view === "achievements") setView("list");
+            if (view === "achievements" || view === "archive") setView("list");
             setSelectedId(id);
           }}
         />

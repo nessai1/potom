@@ -10,3 +10,9 @@ These browser distributions are copied from the official npm packages, without a
 | turndown-plugin-gfm | 1.0.2 | https://github.com/mixmark-io/turndown-plugin-gfm | MIT |
 
 License texts are provided beside the distributions.
+
+## Paper Shaders
+
+The workspace background bundles `@paper-design/shaders-react` and `@paper-design/shaders` 0.0.82, licensed under Apache-2.0. The license and upstream attribution are included in `paper-shaders.LICENSE-APACHE` and `paper-shaders.NOTICE`.
+
+Paper Shaders — Copyright 2026 Paper. Powered by Paper Shaders: https://shaders.paper.design

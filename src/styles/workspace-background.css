@@ -1,0 +1,41 @@
+.app-shell .workspace-body {
+  isolation: isolate;
+}
+.workspace-background {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background: var(--theme-workspace-fallback);
+}
+.workspace-background .workspace-shader {
+  position: absolute;
+  inset: 0;
+  isolation: isolate;
+}
+.workspace-shader > canvas {
+  display: block;
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.app-shell .workspace-body > main {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+html[data-theme="light"] .workspace-body > main {
+  --theme-secondary: #644453;
+  --theme-muted: #6b4a5b;
+  --theme-faint: #755362;
+  --theme-pink: #854461;
+}
+html[data-theme="dark"] .workspace-body > main {
+  --theme-muted: #e3cbd9;
+  --theme-faint: #d4bdcb;
+}

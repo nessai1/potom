@@ -27,16 +27,59 @@ export const percent = (t: Task) =>
 export const taskId = (t: Task) => `PT–${String(t.id).padStart(3, "0")}`;
 export const isUrgent = (t: Task, today = todayKey()) =>
   Boolean(t.due && t.status !== "done" && dayDiff(t.due, today) <= 2);
-export function filterTasks(data: AppData, search = "", project = ""): Task[] {
+export function filterTasks(
+  data: AppData,
+  search = "",
+  project = "",
+  includeArchived = false,
+): Task[] {
   const q = search.toLocaleLowerCase().trim();
   return data.tasks.filter(
     (t) =>
+      (includeArchived || !t.archived) &&
       (!project || t.project === project) &&
       (!q ||
         `${t.title} ${t.description} ${data.projects.find((p) => p.id === t.project)?.name || ""}`
           .toLocaleLowerCase()
           .includes(q)),
   );
+}
+
+export const RECENT_COMPLETED_LIMIT = 10;
+
+/** Legacy date-only completions start at local midnight, matching todayKey(). */
+const completionTime = (task: Task): number =>
+  task.completedAtTime ??
+  new Date(`${task.completedAt || task.created}T00:00:00`).getTime();
+
+/** Newest completion first, with stable ID ordering for legacy same-day ties. */
+export function compareCompletedTasks(a: Task, b: Task): number {
+  return (
+    completionTime(b) - completionTime(a) ||
+    Number(b.completedAtTime !== undefined) -
+      Number(a.completedAtTime !== undefined) ||
+    b.id - a.id
+  );
+}
+
+/** Overflow is marked in place in the task collection; archived tasks never refill the recent ten. */
+export function archiveCompletedTasks(data: AppData): AppData {
+  const completed = data.tasks.filter(
+    (task) => task.status === "done" && !task.archived,
+  );
+  if (completed.length <= RECENT_COMPLETED_LIMIT) return data;
+  const overflow = new Set(
+    completed
+      .sort(compareCompletedTasks)
+      .slice(RECENT_COMPLETED_LIMIT)
+      .map((task) => task.id),
+  );
+  return {
+    ...data,
+    tasks: data.tasks.map((task) =>
+      overflow.has(task.id) ? { ...task, archived: true } : task,
+    ),
+  };
 }
 export function tasksOnDate(tasks: Task[], key: string): Task[] {
   return tasks
@@ -142,6 +185,7 @@ export function updateTask(
   id: number,
   update: (task: Task) => Task,
   today = todayKey(),
+  now = Date.now(),
 ): AppData {
   const before = data.tasks.find((t) => t.id === id);
   if (!before) return data;
@@ -161,7 +205,11 @@ export function updateTask(
       bump("deferred");
     }
     if (after.status === "done") {
+      if (!Number.isSafeInteger(now) || now < 0)
+        throw new Error("Не удалось определить время завершения задачи.");
       after.completedAt = today;
+      after.completedAtTime = now;
+      delete after.archived;
       after.checklist = after.checklist.map((c) => ({ ...c, done: true }));
       if (after.due === today) bump("onTime");
       if (after.due && dayDiff(after.due, today) < 0) bump("lateDone");
@@ -172,6 +220,10 @@ export function updateTask(
     if (after.status === "deferred") after.status = "created";
   }
   if (after.status === "deferred") after.due = "";
+  if (after.status !== "done") {
+    delete after.archived;
+    delete after.completedAtTime;
+  }
   if (after.description !== before.description)
     metrics.descriptionEdits = {
       ...metrics.descriptionEdits,

@@ -127,6 +127,20 @@ export function parseArchive(text: string): AppData {
     date(task.created, `${path}.created`);
     if (task.completedAt !== undefined)
       date(task.completedAt, `${path}.completedAt`);
+    if (task.archived !== undefined) {
+      flag(task.archived, `${path}.archived`);
+      if (task.archived && task.status !== "done")
+        throw new Error("В архиве может находиться только выполненная задача.");
+    }
+    if (task.completedAtTime !== undefined) {
+      if (
+        typeof task.completedAtTime !== "number" ||
+        !Number.isSafeInteger(task.completedAtTime) ||
+        task.completedAtTime < 0 ||
+        task.status !== "done"
+      )
+        throw new Error("Неверное время завершения задачи.");
+    }
     list(task.checklist, `${path}.checklist`).forEach((entry) => {
       const item = object(entry, `${path}.checklist[]`);
       string(item.text, "checklist.text");

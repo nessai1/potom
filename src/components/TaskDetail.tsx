@@ -303,6 +303,7 @@ export default function TaskDetail({
                   <span className="status-dot" />
                   {statusNames[task.status]}
                 </span>
+                {task.archived && <span className="badge gray">В архиве</span>}
                 <span className="task-id">
                   PT–{String(task.id).padStart(3, "0")}
                 </span>

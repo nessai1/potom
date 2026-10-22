@@ -40,6 +40,7 @@ import {
   taskId,
 } from "../model/tasks";
 import { shortDate } from "../model/dates";
+import "../styles/board-layout.css";
 
 interface Props {
   tasks: Task[];
@@ -228,7 +229,7 @@ function Column({
   return (
     <section
       ref={setNodeRef}
-      className={`kanban-col ${over ? "dragover" : ""} ${active ? "is-drag-active" : ""}`}
+      className={`kanban-col ${count === 0 ? "is-empty" : ""} ${over ? "dragover" : ""} ${active ? "is-drag-active" : ""}`}
       data-status={status}
       aria-label={label}
     >
@@ -439,7 +440,10 @@ export default function BoardView({
         onDragEnd={finish}
         onDragCancel={reset}
       >
-        <div ref={board} className={`board ${activeTask ? "is-dragging" : ""}`}>
+        <div
+          ref={board}
+          className={`board kanban-board ${activeTask ? "is-dragging" : ""}`}
+        >
           {statusColumns.map(([status, label]) => (
             <Column
               key={status}
